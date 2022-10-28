@@ -1,0 +1,1084 @@
+---
+title: "Expresión diferencial de genes con DSEq2"
+subtitle: "Expresión diferencial"
+author: "Piero Palacios Bernuy"
+toc: true
+toc-title: Contenido
+number-sections: true
+format: 
+  pdf:
+    geometry: 
+      - top=30mm
+      - left=30mm
+editor: visual
+bibliography: references.bib
+csl: apa-annotated-bibliography.csl
+---
+
+```{r}
+#| include: false
+
+library(knitr)
+library(tinytex)
+knitr::opts_chunk$set(cache = TRUE, cache.lazy = FALSE, warning = FALSE,
+                      message = FALSE, dpi=180, fig.width = 8,
+                      fig.height = 5)
+library(tidyverse)
+library(tximport)
+library(readxl)
+library(DESeq2)
+
+theme_set(theme_minimal())
+```
+
+## Importación de los conteos de genes
+
+Importamos las 92 muestras con su respectiva metadata. Esto lo haremos con el paquete `tximport` debido a que tiene una implementación para importar directamente datos provenientes de *RSEM*.
+
+```{r}
+#| echo: true
+sample_table <-
+  read_excel("D:/laptop piero/tesis cafe/SRaRunTablecoffeaarabica.xlsx")
+rownames(sample_table) <- sample_table$Run
+
+dir <- "D:/laptop piero/tesis cafe/DESeq2 coffea/Gene_counts"
+list.files(dir)
+files <-
+  list.files(file.path(dir), pattern = ".genes.results", full.names = TRUE)
+files <-
+  files[sapply(rownames(sample_table), function(x)
+    grep(x, files, value = FALSE, fixed = TRUE))]
+
+names(files) <- rownames(sample_table)
+
+txi.rsem <- tximport(files,
+                     type = "rsem",
+                     txIn = F,
+                     txOut = F)
+head(txi.rsem$counts, 6, 6)
+
+txi.rsem$length[txi.rsem$length == 0] <- 1
+
+```
+
+Una vez importado, formaremos un objeto del tipo *DESeq* con el siguiente diseño: $\sim Temperatura$. El análisis exploratorio nos dará indicios sobre si añadir los cultivares y los lugares de los laboratorios como parte del modelo.
+
+```{r}
+#| echo: true
+
+dds <-
+  DESeqDataSetFromTximport(txi.rsem, colData = sample_table, design =  ~ temp)
+
+dds_coll <-
+  collapseReplicates(dds, groupby = dds$Replicate, run = dds$Run)
+
+rownames(colData(dds_coll)) <- dds_coll$Run
+
+```
+
+Podemos ver los *size factors* que junto a la longitud promedio de los transcriptos (*avdTxLength*) sirven para la normalización de los conteos:
+
+```{r}
+nm<-assays(dds_coll)[["avgTxLength"]]
+
+sf <- estimateSizeFactorsForMatrix(counts(dds_coll)/nm)
+
+## Estimación de los factores normalizantes
+dds_coll<-estimateSizeFactors(dds_coll)
+
+head(normalizationFactors(dds_coll))
+
+```
+
+A partir de aquí existen dos caminos debido a que la matriz del diseño experimental no tiene *full rank*; es decir, sus columnas son cobinaciones lineares de otras. Estos dos caminos son:
+
+-   Modelar el lugar y los cultivares como efectos batch además de efectos batch desconocidos si sólo es de interés la variable temperatura. $\sim \sum_{batches}+Temperatura$
+
+-   Agrupar los cultivares y temperaturas como interacciones y modelar efectos batch desconocidos si nos interesa el comportamiento de los cultivares a diferentes temperaturas. $\sim \sum_{batches}+Temperatura\times Cultivar$
+
+De acuerdo al análisis exploratorio de datos y a los patrones de agrupamiento de decidió optar por el primer enfoque tratando a los cultivares como réplicas biológicas.
+
+```{r}
+library(sva)
+library(rafalib)
+```
+
+```{r}
+
+dat <- counts(dds_coll, normalized=TRUE)
+idx <- rowMeans(dat) > 1
+dat <- dat[idx,]
+mod.1 <- model.matrix(~ temp, colData(dds_coll))
+mod0.1 <- model.matrix(~ 1, colData(dds_coll))
+svseq.1 <- svaseq(dat, mod.1, mod0.1,n.sv = 2)
+```
+
+```{r}
+# cleaningP = function(y, mod, svaobj,  P=ncol(mod)) {
+#          X=cbind(mod,svaobj$sv)
+#          Hat=solve(t(X)%*%X)%*%t(X)
+#          beta=(Hat%*%t(y))
+#          cleany=y-t(as.matrix(X[,-c(1:P)])%*%beta[-c(1:P),])
+#          return(cleany)
+#  }
+# 
+# 
+# b<-cleaningP(counts(dds_coll,normalized=T),mod.1,svseq.1)
+```
+
+```{r}
+plot(svseq.1$sv[, 1],
+     col = as.fumeric(dds_coll$geo_loc_name_country),
+     pch = 16)
+plot(svseq.1$sv[, 1],
+     svseq.1$sv[, 2],
+     col = as.fumeric(dds_coll$Cultivar),
+     pch = 16)
+plot(svseq.1$sv[, 1],
+     svseq.1$sv[, 2],
+     col = as.fumeric(dds_coll$geo_loc_name_country),
+     pch = 16)
+```
+
+```{r}
+#| echo: true
+dds.sva.1 <- dds_coll
+dds.sva.1$SV1 <- svseq.1$sv[,1]
+dds.sva.1$SV2 <- svseq.1$sv[,2]
+
+dds.sva.1$temp<-factor(
+  dds.sva.1$temp,
+  levels = c("23_19_C",
+             "25_20_C",
+             "30_26_C",
+             "37_28_C",
+             "42_30_C"),
+  labels = c(
+    "23_19_C",
+    "25_20_C",
+    "30_26_C",
+    "37_28_C",
+    "42_30_C"
+  )
+)
+
+design(dds.sva.1) <- ~ SV1 + SV2 + temp
+
+dds.sva.1 <- DESeq(dds.sva.1)
+```
+
+Necesitamos definir los siguientes contrastes:
+
+-   25/20 vs 23/20
+-   30/26 vs 23/20
+-   37/28 vs 23/19
+-   42/30 vs 23/19
+-   42/30 vs 37/28
+
+```{r}
+#| echo: true
+levels(dds.sva.1$temp)
+
+resultsNames(dds.sva.1)
+
+library(munsell)
+## Michael Love:
+## A design with ~batch + type, uses a per-gene fixed effect
+## to account for the differences between batch (similar to
+## the terms that are used to model differences in type).
+
+```
+
+```{r}
+#| echo: true
+res_25_vs_control.1 <- results(
+  dds.sva.1,
+  alpha = 0.05,
+  lfcThreshold = 1,
+  contrast = list("temp_25_20_C_vs_23_19_C")
+)
+
+res_25_vs_control.1.lfc <- lfcShrink(dds.sva.1,
+                                     type = "apeglm",
+                                     lfcThreshold = 1,
+                                     coef = 4)
+plotMA(res_25_vs_control.1)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+plotMA(res_25_vs_control.1.lfc,alpha=0.05)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+
+a<-plotMA(res_25_vs_control.1.lfc,alpha=0.05,returnData=T)
+
+a%>%ggplot(aes(log10(mean),lfc,colour=isDE))+geom_point(alpha=0.2,size=0.8)+geom_hline(aes(yintercept = 0), col = "red",alpha = 0.6)+geom_rug()+geom_hline(yintercept = c(-1,1),color="midnightblue")+scale_colour_manual(name = paste0("FDR = ", 0.05), values = c(mnsl("5PB 2/4"), mnsl("5R 5/16")), labels = c("no DE", "DE"))+
+  labs(y="log2foldchange",x= "Media de conteos normalizados (escala log10)")
+ 
+```
+
+```{r}
+res_30_vs_control.1 <- results(
+  dds.sva.1,
+  alpha = 0.05,
+  lfcThreshold = 1,
+  contrast = list("temp_30_26_C_vs_23_19_C")
+)
+
+res_30_vs_control.1.lfc <- lfcShrink(dds.sva.1,
+                                     type = "apeglm",
+                                     lfcThreshold = 1,
+                                     coef = 5)
+plotMA(res_30_vs_control.1)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+plotMA(res_30_vs_control.1.lfc,alpha=0.05)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+
+a<-plotMA(res_30_vs_control.1.lfc,alpha=0.05,returnData=T)
+
+a%>%ggplot(aes(log10(mean),lfc,colour=isDE))+geom_point(alpha=0.2,size=0.8)+geom_hline(aes(yintercept = 0), col = "red",alpha = 0.6)+geom_rug()+geom_hline(yintercept = c(-1,1),color="midnightblue")+scale_colour_manual(name = paste0("FDR = ", 0.05), values = c(mnsl("5PB 2/4"), mnsl("5R 5/16")), labels = c("no DE", "DE"))+
+  labs(y="log2foldchange",x= "Media de conteos normalizados (escala log10)")
+```
+
+```{r}
+#| echo: true
+res_37_vs_control.1 <- results(
+  dds.sva.1,
+  alpha = 0.05,
+  lfcThreshold = 1,
+  contrast = list("temp_37_28_C_vs_23_19_C")
+)
+
+res_37_vs_control.1.lfc <- lfcShrink(dds.sva.1,
+                                     type = "apeglm",
+                                     lfcThreshold = 1,
+                                     coef = 6)
+plotMA(res_37_vs_control.1)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+plotMA(res_37_vs_control.1.lfc,alpha=0.05)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+
+a<-plotMA(res_37_vs_control.1.lfc,alpha=0.05,returnData=T)
+
+a%>%ggplot(aes(log10(mean),lfc,colour=isDE))+geom_point(alpha=0.2,size=0.8)+geom_hline(aes(yintercept = 0), col = "red",alpha = 0.6)+geom_rug()+geom_hline(yintercept = c(-1,1),color="midnightblue")+scale_colour_manual(name = paste0("FDR = ", 0.05), values = c(mnsl("5PB 2/4"), mnsl("5R 5/16")), labels = c("no DE", "DE"))+
+  labs(y="log2foldchange",x= "Media de conteos normalizados (escala log10)")
+ 
+```
+
+```{r}
+#| echo: true
+res_42_vs_control.1 <- results(
+  dds.sva.1,
+  alpha = 0.05,
+  lfcThreshold = 1,
+  contrast = list("temp_42_30_C_vs_23_19_C")
+)
+
+res_42_vs_control.1.lfc <- lfcShrink(dds.sva.1,
+                                     type = "apeglm",
+                                     lfcThreshold = 1,
+                                     coef = 7)
+
+plotMA(res_42_vs_control.1)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+plotMA(res_42_vs_control.1.lfc,alpha=0.05)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+
+a<-plotMA(res_42_vs_control.1.lfc,alpha=0.05,returnData=T)
+
+a%>%ggplot(aes(log10(mean),lfc,colour=isDE))+geom_point(alpha=0.2,size=0.8)+geom_hline(aes(yintercept = 0), col = "red",alpha = 0.6)+geom_rug()+geom_hline(yintercept = c(-1,1),color="midnightblue")+scale_colour_manual(name = paste0("FDR = ", 0.05), values = c(mnsl("5PB 2/4"), mnsl("5R 5/16")), labels = c("no DE", "DE"))+
+  labs(y="log2foldchange",x= "Media de conteos normalizados (escala log10)")
+```
+
+```{r}
+#| echo: true
+
+levels(dds.sva.1$temp)
+dds.sva.1$temp <- relevel(dds.sva.1$temp, "25_20_C")
+
+dds.sva.1 <- nbinomWaldTest(dds.sva.1)
+
+resultsNames(dds.sva.1)
+
+```
+
+```{r}
+res_30_vs_25.1 <- results(
+  dds.sva.1,
+  alpha = 0.05,
+  lfcThreshold = 1,
+  contrast = list("temp_30_26_C_vs_25_20_C")
+)
+
+res_30_vs_25.1.lfc <- lfcShrink(dds.sva.1,
+                                type = "apeglm",
+                                coef = 5,
+                                lfcThreshold = 1)
+
+plotMA(res_30_vs_25.1)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+plotMA(res_30_vs_25.1.lfc,alpha=0.05)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+
+
+a<-plotMA(res_30_vs_25.1.lfc,alpha=0.05,returnData=T)
+
+a%>%ggplot(aes(log10(mean),lfc,colour=isDE))+geom_point(alpha=0.2,size=0.8)+geom_hline(aes(yintercept = 0), col = "red",alpha = 0.6)+geom_rug()+geom_hline(yintercept = c(-1,1),color="midnightblue")+scale_colour_manual(name = paste0("FDR = ", 0.05), values = c(mnsl("5PB 2/4"), mnsl("5R 5/16")), labels = c("no DE", "DE"))+
+  labs(y="log2foldchange",x= "Media de conteos normalizados (escala log10)")
+```
+
+```{r}
+res_37_vs_25.1 <- results(
+  dds.sva.1,
+  alpha = 0.05,
+  lfcThreshold = 1,
+  contrast = list("temp_37_28_C_vs_25_20_C")
+)
+
+res_37_vs_25.1.lfc <- lfcShrink(dds.sva.1,
+                                type = "apeglm",
+                                coef = 6,
+                                lfcThreshold = 1)
+
+plotMA(res_37_vs_25.1)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+plotMA(res_37_vs_25.1.lfc,alpha=0.05)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+
+
+a<-plotMA(res_37_vs_25.1.lfc,alpha=0.05,returnData=T)
+
+a%>%ggplot(aes(log10(mean),lfc,colour=isDE))+geom_point(alpha=0.2,size=0.8)+geom_hline(aes(yintercept = 0), col = "red",alpha = 0.6)+geom_rug()+geom_hline(yintercept = c(-1,1),color="midnightblue")+scale_colour_manual(name = paste0("FDR = ", 0.05), values = c(mnsl("5PB 2/4"), mnsl("5R 5/16")), labels = c("no DE", "DE"))+
+  labs(y="log2foldchange",x= "Media de conteos normalizados (escala log10)")
+```
+
+```{r}
+res_42_vs_25.1 <- results(
+  dds.sva.1,
+  alpha = 0.05,
+  lfcThreshold = 1,
+  contrast = list("temp_42_30_C_vs_25_20_C")
+)
+
+res_42_vs_25.1.lfc <- lfcShrink(dds.sva.1,
+                                type = "apeglm",
+                                coef = 7,
+                                lfcThreshold = 1)
+
+plotMA(res_42_vs_25.1)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+plotMA(res_42_vs_25.1.lfc,alpha=0.05)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+
+
+a<-plotMA(res_42_vs_25.1.lfc,alpha=0.05,returnData=T)
+
+a%>%ggplot(aes(log10(mean),lfc,colour=isDE))+geom_point(alpha=0.2,size=0.8)+geom_hline(aes(yintercept = 0), col = "red",alpha = 0.6)+geom_rug()+geom_hline(yintercept = c(-1,1),color="midnightblue")+scale_colour_manual(name = paste0("FDR = ", 0.05), values = c(mnsl("5PB 2/4"), mnsl("5R 5/16")), labels = c("no DE", "DE"))+
+  labs(y="log2foldchange",x= "Media de conteos normalizados (escala log10)")
+```
+
+```{r}
+#| echo: true
+
+levels(dds.sva.1$temp)
+dds.sva.1$temp <- relevel(dds.sva.1$temp, "30_26_C")
+
+dds.sva.1 <- nbinomWaldTest(dds.sva.1)
+
+resultsNames(dds.sva.1)
+
+```
+
+```{r}
+
+res_37_vs_30.1 <- results(
+  dds.sva.1,
+  alpha = 0.05,
+  lfcThreshold = 1,
+  contrast = list("temp_37_28_C_vs_30_26_C")
+)
+
+res_37_vs_30.1.lfc <- lfcShrink(dds.sva.1,
+                                type = "apeglm",
+                                coef = 6,
+                                lfcThreshold = 1)
+
+plotMA(res_37_vs_30.1)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+plotMA(res_37_vs_30.1.lfc,alpha=0.05)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+
+
+a<-plotMA(res_37_vs_30.1.lfc,alpha=0.05,returnData=T)
+
+a%>%ggplot(aes(log10(mean),lfc,colour=isDE))+geom_point(alpha=0.2,size=0.8)+geom_hline(aes(yintercept = 0), col = "red",alpha = 0.6)+geom_rug()+geom_hline(yintercept = c(-1,1),color="midnightblue")+scale_colour_manual(name = paste0("FDR = ", 0.05), values = c(mnsl("5PB 2/4"), mnsl("5R 5/16")), labels = c("no DE", "DE"))+
+  labs(y="log2foldchange",x= "Media de conteos normalizados (escala log10)")
+```
+
+```{r}
+res_42_vs_30.1 <- results(
+  dds.sva.1,
+  alpha = 0.05,
+  lfcThreshold = 1,
+  contrast = list("temp_42_30_C_vs_30_26_C")
+)
+
+res_42_vs_30.1.lfc <- lfcShrink(dds.sva.1,
+                                type = "apeglm",
+                                coef = 7,
+                                lfcThreshold = 1)
+
+plotMA(res_42_vs_30.1)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+plotMA(res_42_vs_30.1.lfc,alpha=0.05)
+abline(h = c(-1, 1), col = "dodgerblue", lwd = 2)
+
+
+a<-plotMA(res_42_vs_30.1.lfc,alpha=0.05,returnData=T)
+
+a%>%ggplot(aes(log10(mean),lfc,colour=isDE))+geom_point(alpha=0.2,size=0.8)+geom_hline(aes(yintercept = 0), col = "red",alpha = 0.6)+geom_rug()+geom_hline(yintercept = c(-1,1),color="midnightblue")+scale_colour_manual(name = paste0("FDR = ", 0.05), values = c(mnsl("5PB 2/4"), mnsl("5R 5/16")), labels = c("no DE", "DE"))+
+  labs(y="log2foldchange",x= "Media de conteos normalizados (escala log10)")
+```
+
+```{r}
+# write.csv(res_37_vs_control.1.lfc,file = "res_37_vs_control.1.lfc.csv")
+# 
+# write.csv(res_42_vs_control.1.lfc,file = "res_42_vs_control.1.lfc.csv")
+# 
+# write.csv(res_42_vs_37.1.lfc,file = "res_42_vs_37.1.lfc.csv")
+```
+
+### Análisis de genesets
+
+```{r}
+library(org.Carabica.eg.db)
+library(Cara1.0)
+```
+
+```{r}
+txdb<-loadDb("C:/Users/Piero/Documents/laptop piero/tesis cafe/blast2go/TxDb.Carabica.cara01.sqlite")
+```
+
+## Cargar tablas de resultados
+
+### Contraste 37 vs Control
+
+#### creando el objeto de anotación para genetonic
+
+```{r}
+k<-keys(org.Carabica.eg.db)
+
+a<-select(org.Carabica.eg.db,keys = k,keytype = "GID",columns = c("SYMBOL","GENENAMENCBI"))
+
+annodf<-
+  data.frame(gene_id=a$SYMBOL,gene_name=a$SYMBOL)
+
+annodf<-
+  annodf%>%
+  distinct_at(vars(gene_id,gene_name))
+
+rownames(annodf)<-annodf$gene_id
+```
+
+```{r}
+# res_37_vs_control.lfc<-read.csv("D:/tesis cafe/DESeq2 coffea/res_37_vs_control.1.lfc.csv",header = T)
+
+res_25_vs_control.1.lfc$SYMBOL<-annodf$gene_id[match(rownames(res_25_vs_control.1.lfc),
+                                                 annodf$gene_id)]
+
+res_25_vs_control.lfc<-res_25_vs_control.1.lfc%>%
+  as.data.frame()%>%
+  dplyr::select(SYMBOL,log2FoldChange)%>%
+  na.omit()%>%
+  distinct()%>%
+  group_by(SYMBOL)%>%
+  summarize(log2FoldChange=mean(log2FoldChange))
+  
+
+res_25_vs_control.lfc_ranks<-deframe(res_25_vs_control.lfc)
+
+```
+
+```{r}
+
+columns(org.Carabica.eg.db)
+columns(Cara1.0)
+
+gid2symbol<-AnnotationDbi::select(Cara1.0,keys = res_25_vs_control.lfc$SYMBOL,keytype = "SYMBOL",columns = c("GENENAMENCBI","GID","GO"))
+
+gid2symbol<-as_tibble(gid2symbol)
+
+```
+
+```{r}
+library(rols)
+
+ol<-Ontologies()
+
+go<-Ontology("go")
+
+gotrms <- terms("go") ## or terms("go")
+gotrms
+                                
+```
+
+```{r}
+#Create list of goterms with genes
+#
+res_25_vs_control.lfc_list<-gid2symbol%>%
+  group_by(GO)%>%
+  nest()
+
+res_25_vs_control.lfc_list<-res_25_vs_control.lfc_list[-1,]
+
+res_25_vs_control.lfc_list<-res_25_vs_control.lfc_list%>%
+  mutate(filtered=map(data,function(df) df[,1]))
+
+res_25_vs_control.lfc_list<-res_25_vs_control.lfc_list%>%
+  unnest_wider(filtered)
+
+
+res_25_vs_control.lfc_list_2<-as.list(res_25_vs_control.lfc_list$SYMBOL)
+
+go_names<-gotrms[res_25_vs_control.lfc_list$GO]
+go_names<-enframe(termLabel(go_names))
+
+names(res_25_vs_control.lfc_list_2)<-paste0(res_25_vs_control.lfc_list$GO,":",go_names$value)
+
+
+```
+
+```{r}
+library(fgsea)
+
+res_25_vs_control.lfc_fgsea <-
+  fgsea::fgsea(pathways = res_25_vs_control.lfc_list_2,
+               stats = res_25_vs_control.lfc_ranks)
+
+res_25_vs_control.lfc_fgsea <- res_25_vs_control.lfc_fgsea %>%
+  arrange(desc(NES))
+
+library(GeneTonic)
+
+res_25_vs_control.lfc_fgsea_shaked<-shake_fgseaResult(res_25_vs_control.lfc_fgsea)
+res_25_vs_control.lfc_fgsea_shaked<-
+  res_25_vs_control.lfc_fgsea_shaked%>%
+  drop_na()
+
+
+res_25_vs_control.lfc_topPathwaysUp <-
+  res_25_vs_control.lfc_fgsea[ES > 0][head(order(pval), n = 10), pathway]
+res_25_vs_control.lfc_topPathwaysDown <-
+  res_25_vs_control.lfc_fgsea[ES < 0][head(order(pval), n = 10), pathway]
+res_25_vs_control.lfc_topPathways <-
+  c(res_25_vs_control.lfc_topPathwaysUp,
+    rev(res_25_vs_control.lfc_topPathwaysDown))
+fgsea::plotGseaTable(
+  res_25_vs_control.lfc_list_2[res_25_vs_control.lfc_topPathways],
+  res_25_vs_control.lfc_ranks,
+  res_25_vs_control.lfc_fgsea,
+  gseaParam = 0.5
+)
+
+res_25_vs_control.lfc_fgsea_shaked_aggr <- get_aggrscores(
+    res_enrich = res_25_vs_control.lfc_fgsea_shaked,
+    res_de = res_25_vs_control.1.lfc,
+    annotation_obj = annodf
+)
+
+res_25_vs_control.lfc_fgsea_shaked_aggr$gs_id<- substr(str_extract(res_25_vs_control.lfc_fgsea_shaked_aggr$gs_id,"GO:(.*?):"),start = 1,stop = 10)
+
+res_25_vs_control.lfc_fgsea_shaked_aggr_gonames<-
+  gotrms[res_25_vs_control.lfc_fgsea_shaked_aggr$gs_id]
+
+res_25_vs_control.lfc_fgsea_shaked_aggr_gonames<-enframe(termLabel(res_25_vs_control.lfc_fgsea_shaked_aggr_gonames))
+
+res_25_vs_control.lfc_fgsea_shaked_aggr$gs_description<-
+  res_25_vs_control.lfc_fgsea_shaked_aggr_gonames$value
+
+```
+
+```{r}
+res_25_vs_control.1.lfc<-res_25_vs_control.1.lfc%>%
+  na.omit()
+
+res_25_vs_control.lfc_fgsea_shaked_aggr<-res_25_vs_control.lfc_fgsea_shaked_aggr%>%
+  na.omit()
+
+gtl_25_vs_control <- GeneTonic_list(
+  dds = dds.sva.1,
+  res_de = res_25_vs_control.1,
+  res_enrich = res_25_vs_control.lfc_fgsea_shaked_aggr,
+  annotation_obj = annodf
+)
+
+
+#GeneTonic(gtl = gtl_37_vs_control)
+
+#saveRDS(gtl_37_vs_control, "gtl_37_vs_control.rds")
+
+gtl_37_vs_control<-readRDS("gtl_37_vs_control.rds")
+```
+
+### Contraste 30 vs Control
+
+```{r}
+# res_37_vs_control.lfc<-read.csv("D:/tesis cafe/DESeq2 coffea/res_37_vs_control.1.lfc.csv",header = T)
+
+res_30_vs_control.1.lfc$SYMBOL<-annodf$gene_id[match(rownames(res_30_vs_control.1.lfc),
+                                                 annodf$gene_id)]
+
+res_30_vs_control.lfc<-res_30_vs_control.1.lfc%>%
+  as.data.frame()%>%
+  dplyr::select(SYMBOL,log2FoldChange)%>%
+  na.omit()%>%
+  distinct()%>%
+  group_by(SYMBOL)%>%
+  summarize(log2FoldChange=mean(log2FoldChange))
+  
+
+res_30_vs_control.lfc_ranks<-deframe(res_30_vs_control.lfc)
+
+```
+
+```{r}
+
+columns(org.Carabica.eg.db)
+columns(Cara1.0)
+
+gid2symbol<-AnnotationDbi::select(Cara1.0,keys = res_30_vs_control.lfc$SYMBOL,keytype = "SYMBOL",columns = c("GENENAMENCBI","GID","GO"))
+
+gid2symbol<-as_tibble(gid2symbol)
+
+```
+
+```{r}
+#Create list of goterms with genes
+#
+res_30_vs_control.lfc_list<-gid2symbol%>%
+  group_by(GO)%>%
+  nest()
+
+res_30_vs_control.lfc_list<-res_30_vs_control.lfc_list[-1,]
+
+res_30_vs_control.lfc_list<-res_30_vs_control.lfc_list%>%
+  mutate(filtered=map(data,function(df) df[,1]))
+
+res_30_vs_control.lfc_list<-res_30_vs_control.lfc_list%>%
+  unnest_wider(filtered)
+
+
+res_30_vs_control.lfc_list_2<-as.list(res_30_vs_control.lfc_list$SYMBOL)
+
+go_names<-gotrms[res_30_vs_control.lfc_list$GO]
+go_names<-enframe(termLabel(go_names))
+
+names(res_30_vs_control.lfc_list_2)<-paste0(res_30_vs_control.lfc_list$GO,":",go_names$value)
+
+
+```
+
+```{r}
+library(fgsea)
+
+res_30_vs_control.lfc_fgsea <-
+  fgsea::fgsea(pathways = res_30_vs_control.lfc_list_2,
+               stats = res_30_vs_control.lfc_ranks)
+
+res_30_vs_control.lfc_fgsea <- res_30_vs_control.lfc_fgsea %>%
+  arrange(desc(NES))
+
+library(GeneTonic)
+
+res_30_vs_control.lfc_fgsea_shaked<-shake_fgseaResult(res_30_vs_control.lfc_fgsea)
+res_30_vs_control.lfc_fgsea_shaked<-
+  res_30_vs_control.lfc_fgsea_shaked%>%
+  drop_na()
+
+
+res_30_vs_control.lfc_topPathwaysUp <-
+  res_30_vs_control.lfc_fgsea[ES > 0][head(order(pval), n = 10), pathway]
+res_30_vs_control.lfc_topPathwaysDown <-
+  res_30_vs_control.lfc_fgsea[ES < 0][head(order(pval), n = 10), pathway]
+res_30_vs_control.lfc_topPathways <-
+  c(res_30_vs_control.lfc_topPathwaysUp,
+    rev(res_30_vs_control.lfc_topPathwaysDown))
+fgsea::plotGseaTable(
+  res_30_vs_control.lfc_list_2[res_30_vs_control.lfc_topPathways],
+  res_30_vs_control.lfc_ranks,
+  res_30_vs_control.lfc_fgsea,
+  gseaParam = 0.5
+)
+
+res_30_vs_control.lfc_fgsea_shaked_aggr <- get_aggrscores(
+    res_enrich = res_30_vs_control.lfc_fgsea_shaked,
+    res_de = res_30_vs_control.1.lfc,
+    annotation_obj = annodf
+)
+
+res_30_vs_control.lfc_fgsea_shaked_aggr$gs_id<- substr(str_extract(res_30_vs_control.lfc_fgsea_shaked_aggr$gs_id,"GO:(.*?):"),start = 1,stop = 10)
+
+res_30_vs_control.lfc_fgsea_shaked_aggr_gonames<-
+  gotrms[res_30_vs_control.lfc_fgsea_shaked_aggr$gs_id]
+
+res_30_vs_control.lfc_fgsea_shaked_aggr_gonames<-enframe(termLabel(res_30_vs_control.lfc_fgsea_shaked_aggr_gonames))
+
+res_30_vs_control.lfc_fgsea_shaked_aggr$gs_description<-
+  res_30_vs_control.lfc_fgsea_shaked_aggr_gonames$value
+
+```
+
+```{r}
+res_30_vs_control.1.lfc<-res_30_vs_control.1.lfc%>%
+  na.omit()
+
+res_30_vs_control.lfc_fgsea_shaked_aggr<-res_30_vs_control.lfc_fgsea_shaked_aggr%>%
+  na.omit()
+
+gtl_30_vs_control <- GeneTonic_list(
+  dds = dds.sva.1,
+  res_de = res_30_vs_control.1,
+  res_enrich = res_30_vs_control.lfc_fgsea_shaked_aggr,
+  annotation_obj = annodf
+)
+
+
+#GeneTonic(gtl = gtl_42_vs_control)
+
+#saveRDS(gtl_42_vs_control, "gtl_42_vs_control.rds")
+
+gtl_30_vs_control<-readRDS("gtl_42_vs_control.rds")
+```
+
+### Contraste 37 vs control
+
+```{r}
+# res_37_vs_control.lfc<-read.csv("D:/tesis cafe/DESeq2 coffea/res_37_vs_control.1.lfc.csv",header = T)
+
+res_37_vs_control.1.lfc$SYMBOL<-annodf$gene_id[match(rownames(res_37_vs_control.1.lfc),
+                                                 annodf$gene_id)]
+
+res_37_vs_control.lfc<-res_37_vs_control.1.lfc%>%
+  as.data.frame()%>%
+  dplyr::select(SYMBOL,log2FoldChange)%>%
+  na.omit()%>%
+  distinct()%>%
+  group_by(SYMBOL)%>%
+  summarize(log2FoldChange=mean(log2FoldChange))
+  
+
+res_37_vs_control.lfc_ranks<-deframe(res_37_vs_control.lfc)
+
+```
+
+```{r}
+
+columns(org.Carabica.eg.db)
+columns(Cara1.0)
+
+gid2symbol<-AnnotationDbi::select(Cara1.0,keys = res_37_vs_control.lfc$SYMBOL,keytype = "SYMBOL",columns = c("GENENAMENCBI","GID","GO"))
+
+gid2symbol<-as_tibble(gid2symbol)
+
+```
+
+```{r}
+#Create list of goterms with genes
+#
+res_37_vs_control.lfc_list<-gid2symbol%>%
+  group_by(GO)%>%
+  nest()
+
+res_37_vs_control.lfc_list<-res_37_vs_control.lfc_list[-1,]
+
+res_37_vs_control.lfc_list<-res_37_vs_control.lfc_list%>%
+  mutate(filtered=map(data,function(df) df[,1]))
+
+res_37_vs_control.lfc_list<-res_37_vs_control.lfc_list%>%
+  unnest_wider(filtered)
+
+
+res_37_vs_control.lfc_list_2<-as.list(res_37_vs_control.lfc_list$SYMBOL)
+
+go_names<-gotrms[res_37_vs_control.lfc_list$GO]
+go_names<-enframe(termLabel(go_names))
+
+names(res_37_vs_control.lfc_list_2)<-paste0(res_37_vs_control.lfc_list$GO,":",go_names$value)
+
+
+```
+
+```{r}
+library(fgsea)
+
+res_37_vs_control.lfc_fgsea <-
+  fgsea::fgsea(pathways = res_37_vs_control.lfc_list_2,
+               stats = res_37_vs_control.lfc_ranks)
+
+res_37_vs_control.lfc_fgsea <- res_37_vs_control.lfc_fgsea %>%
+  arrange(desc(NES))
+
+library(GeneTonic)
+
+res_37_vs_control.lfc_fgsea_shaked<-shake_fgseaResult(res_37_vs_control.lfc_fgsea)
+res_37_vs_control.lfc_fgsea_shaked<-
+  res_37_vs_control.lfc_fgsea_shaked%>%
+  drop_na()
+
+
+res_37_vs_control.lfc_topPathwaysUp <-
+  res_37_vs_control.lfc_fgsea[ES > 0][head(order(pval), n = 10), pathway]
+res_37_vs_control.lfc_topPathwaysDown <-
+  res_37_vs_control.lfc_fgsea[ES < 0][head(order(pval), n = 10), pathway]
+res_37_vs_control.lfc_topPathways <-
+  c(res_37_vs_control.lfc_topPathwaysUp,
+    rev(res_37_vs_control.lfc_topPathwaysDown))
+fgsea::plotGseaTable(
+  res_37_vs_control.lfc_list_2[res_37_vs_control.lfc_topPathways],
+  res_37_vs_control.lfc_ranks,
+  res_37_vs_control.lfc_fgsea,
+  gseaParam = 0.5
+)
+
+res_37_vs_control.lfc_fgsea_shaked_aggr <- get_aggrscores(
+    res_enrich = res_37_vs_control.lfc_fgsea_shaked,
+    res_de = res_37_vs_control.1.lfc,
+    annotation_obj = annodf
+)
+
+res_37_vs_control.lfc_fgsea_shaked_aggr$gs_id<- substr(str_extract(res_37_vs_control.lfc_fgsea_shaked_aggr$gs_id,"GO:(.*?):"),start = 1,stop = 10)
+
+res_37_vs_control.lfc_fgsea_shaked_aggr_gonames<-
+  gotrms[res_37_vs_control.lfc_fgsea_shaked_aggr$gs_id]
+
+res_37_vs_control.lfc_fgsea_shaked_aggr_gonames<-enframe(termLabel(res_37_vs_control.lfc_fgsea_shaked_aggr_gonames))
+
+res_37_vs_control.lfc_fgsea_shaked_aggr$gs_description<-
+  res_37_vs_control.lfc_fgsea_shaked_aggr_gonames$value
+
+```
+
+```{r}
+res_37_vs_control.1.lfc<-res_37_vs_control.1.lfc%>%
+  na.omit()
+
+res_37_vs_control.lfc_fgsea_shaked_aggr<-res_37_vs_control.lfc_fgsea_shaked_aggr%>%
+  na.omit()
+
+gtl_37_vs_control <- GeneTonic_list(
+  dds = dds.sva.1,
+  res_de = res_37_vs_control.1,
+  res_enrich = res_37_vs_control.lfc_fgsea_shaked_aggr,
+  annotation_obj = annodf
+)
+
+
+#GeneTonic(gtl = gtl_37_vs_control)
+
+#saveRDS(gtl_42_vs_control, "gtl_37_vs_control.rds")
+
+gtl_37_vs_control<-readRDS("gtl_37_vs_control.rds")
+```
+
+### Contraste 42 vs control
+
+```{r}
+# res_37_vs_control.lfc<-read.csv("D:/tesis cafe/DESeq2 coffea/res_37_vs_control.1.lfc.csv",header = T)
+
+res_42_vs_control.1.lfc$SYMBOL<-annodf$gene_id[match(rownames(res_42_vs_control.1.lfc),
+                                                 annodf$gene_id)]
+
+res_42_vs_control.lfc<-res_42_vs_control.1.lfc%>%
+  as.data.frame()%>%
+  dplyr::select(SYMBOL,log2FoldChange)%>%
+  na.omit()%>%
+  distinct()%>%
+  group_by(SYMBOL)%>%
+  summarize(log2FoldChange=mean(log2FoldChange))
+  
+
+res_42_vs_control.lfc_ranks<-deframe(res_42_vs_control.lfc)
+
+```
+
+```{r}
+
+columns(org.Carabica.eg.db)
+columns(Cara1.0)
+
+gid2symbol<-AnnotationDbi::select(Cara1.0,keys = res_42_vs_control.lfc$SYMBOL,keytype = "SYMBOL",columns = c("GENENAMENCBI","GID","GO"))
+
+gid2symbol<-as_tibble(gid2symbol)
+
+```
+
+```{r}
+#Create list of goterms with genes
+#
+res_42_vs_control.lfc_list<-gid2symbol%>%
+  group_by(GO)%>%
+  nest()
+
+res_42_vs_control.lfc_list<-res_42_vs_control.lfc_list[-1,]
+
+res_42_vs_control.lfc_list<-res_42_vs_control.lfc_list%>%
+  mutate(filtered=map(data,function(df) df[,1]))
+
+res_42_vs_control.lfc_list<-res_42_vs_control.lfc_list%>%
+  unnest_wider(filtered)
+
+
+res_42_vs_control.lfc_list_2<-as.list(res_42_vs_control.lfc_list$SYMBOL)
+
+go_names<-gotrms[res_42_vs_control.lfc_list$GO]
+go_names<-enframe(termLabel(go_names))
+
+names(res_42_vs_control.lfc_list_2)<-paste0(res_42_vs_control.lfc_list$GO,":",go_names$value)
+
+
+```
+
+```{r}
+library(fgsea)
+
+res_42_vs_control.lfc_fgsea <-
+  fgsea::fgsea(pathways = res_42_vs_control.lfc_list_2,
+               stats = res_42_vs_control.lfc_ranks)
+
+res_42_vs_control.lfc_fgsea <- res_42_vs_control.lfc_fgsea %>%
+  arrange(desc(NES))
+
+library(GeneTonic)
+
+res_42_vs_control.lfc_fgsea_shaked<-shake_fgseaResult(res_42_vs_control.lfc_fgsea)
+res_42_vs_control.lfc_fgsea_shaked<-
+  res_42_vs_control.lfc_fgsea_shaked%>%
+  drop_na()
+
+
+res_42_vs_control.lfc_topPathwaysUp <-
+  res_42_vs_control.lfc_fgsea[ES > 0][head(order(pval), n = 10), pathway]
+res_42_vs_control.lfc_topPathwaysDown <-
+  res_42_vs_control.lfc_fgsea[ES < 0][head(order(pval), n = 10), pathway]
+res_42_vs_control.lfc_topPathways <-
+  c(res_42_vs_control.lfc_topPathwaysUp,
+    rev(res_42_vs_control.lfc_topPathwaysDown))
+fgsea::plotGseaTable(
+  res_42_vs_control.lfc_list_2[res_42_vs_control.lfc_topPathways],
+  res_42_vs_control.lfc_ranks,
+  res_42_vs_control.lfc_fgsea,
+  gseaParam = 0.5
+)
+
+res_42_vs_control.lfc_fgsea_shaked_aggr <- get_aggrscores(
+    res_enrich = res_42_vs_control.lfc_fgsea_shaked,
+    res_de = res_42_vs_control.1.lfc,
+    annotation_obj = annodf
+)
+
+res_42_vs_control.lfc_fgsea_shaked_aggr$gs_id<- substr(str_extract(res_42_vs_control.lfc_fgsea_shaked_aggr$gs_id,"GO:(.*?):"),start = 1,stop = 10)
+
+res_42_vs_control.lfc_fgsea_shaked_aggr_gonames<-
+  gotrms[res_42_vs_control.lfc_fgsea_shaked_aggr$gs_id]
+
+res_42_vs_control.lfc_fgsea_shaked_aggr_gonames<-enframe(termLabel(res_42_vs_control.lfc_fgsea_shaked_aggr_gonames))
+
+res_42_vs_control.lfc_fgsea_shaked_aggr$gs_description<-
+  res_42_vs_control.lfc_fgsea_shaked_aggr_gonames$value
+
+```
+
+```{r}
+res_42_vs_control.1.lfc<-res_42_vs_control.1.lfc%>%
+  na.omit()
+
+res_42_vs_control.lfc_fgsea_shaked_aggr<-res_42_vs_control.lfc_fgsea_shaked_aggr%>%
+  na.omit()
+
+gtl_42_vs_control <- GeneTonic_list(
+  dds = dds.sva.1,
+  res_de = res_42_vs_control.1,
+  res_enrich = res_42_vs_control.lfc_fgsea_shaked_aggr,
+  annotation_obj = annodf
+)
+
+
+#GeneTonic(gtl = gtl_42_vs_control)
+
+#saveRDS(gtl_42_vs_control, "gtl_42_vs_control.rds")
+
+gtl_37_vs_control<-readRDS("gtl_42_vs_control.rds")
+```
+
+```{r}
+a<-res_42_vs_37.lfc_fgsea[ES > 0][head(order(pval), n = 20), pathway]
+
+gs_radar(res_enrich = res_42_vs_control.lfc_fgsea_shaked_aggr[a,],
+         res_enrich2 = res_42_vs_37.lfc_fgsea_shaked_aggr[a,])
+```
+
+```{r}
+gs_radar2<-function (res_enrich, res_enrich2 = NULL,res_enrich3 = NULL, n_gs = 20, p_value_column = "gs_pvalue") 
+{
+  if (!("z_score" %in% colnames(res_enrich))) {
+    warning("You need to add the z_score or the aggregated score")
+  }
+  if (!is.null(res_enrich2)) {
+    if (!("z_score" %in% colnames(res_enrich2))) {
+      warning("You need to add the z_score or the aggregated score")
+    }
+  }
+  if (!is.null(res_enrich3)) {
+    if (!("z_score" %in% colnames(res_enrich3))) {
+      warning("You need to add the z_score or the aggregated score")
+    }
+  }
+  if (is.null(res_enrich2) & is.null(res_enrich3)) {
+    res_enrich$logp10 <- -log10(res_enrich[[p_value_column]])
+    res_enrich <- res_enrich[seq_len(n_gs), ]
+    log_smallest_p <- max(res_enrich$logp10)
+    set_colors <- RColorBrewer::brewer.pal(n = 8, "Dark2")
+    p <- plot_ly(type = "scatterpolar", mode = "markers", 
+      fill = "toself") %>% add_trace(r = c(res_enrich$logp10, 
+      res_enrich$logp10[1]), theta = c(res_enrich[["gs_description"]], 
+      res_enrich[["gs_description"]][1]), name = "scenario 1") %>% 
+      plotly::layout(polar = list(radialaxis = list(visible = TRUE, 
+        range = c(0, log_smallest_p))))
+  }
+  else {
+    gs_set1 <- res_enrich$gs_id
+    gs_set2 <- res_enrich2$gs_id
+    gs_set3 <- res_enrich3$gs_id
+    gs_common <- Reduce(intersect,list(gs_set1, gs_set2, gs_set3))
+    gs_common <- gs_common[seq_len(min(n_gs, length(gs_common)))]
+    if (length(gs_common) == 0) {
+      stop("No gene sets have been found in common to the two enrichment results")
+    }
+    common_re1 <- res_enrich[gs_common, ]
+    common_re2 <- res_enrich2[gs_common, ]
+    common_re3 <- res_enrich3[gs_common, ]
+    common_re1$logp10 <- -log10(common_re1[[p_value_column]])
+    common_re2$logp10 <- -log10(common_re2[[p_value_column]])
+    common_re3$logp10 <- -log10(common_re3[[p_value_column]])
+    
+    log_smallest_p <- max(common_re1$logp10, common_re2$logp10, common_re3$logp10)
+    set_colors <- RColorBrewer::brewer.pal(n = 8, "Dark2")
+    p <- plot_ly(type = "scatterpolar", mode = "markers", 
+      fill = "toself") %>%add_trace(r = c(common_re1$logp10, 
+      common_re1$logp10[1]), theta = c(common_re1[["gs_description"]], 
+      common_re1[["gs_description"]][1]), name = "scenario 1")%>%add_trace(r = c(common_re2$logp10, common_re2$logp10[1]), 
+        theta = c(common_re2[["gs_description"]], common_re2[["gs_description"]][1]), 
+        name = "scenario 2")%>%add_trace(r = c(common_re3$logp10, 
+      common_re3$logp10[1]), theta = c(common_re3[["gs_description"]], 
+      common_re3[["gs_description"]][1]), name = "scenario 3")%>%
+      plotly::layout(polar = list(radialaxis = list(visible = TRUE, 
+      range = c(0, log_smallest_p))))
+  }
+  return(p)
+}
+
+library(plotly)
+
+a<-res_42_vs_control.lfc_fgsea[ES > 0][head(order(pval), n = 20), pathway]
+
+gs_radar2(res_enrich = res_37_vs_control.lfc_fgsea_shaked_aggr[a,],
+res_enrich2 = res_42_vs_control.lfc_fgsea_shaked_aggr[a,],
+res_enrich3 = res_42_vs_37.lfc_fgsea_shaked_aggr[a,])
+```

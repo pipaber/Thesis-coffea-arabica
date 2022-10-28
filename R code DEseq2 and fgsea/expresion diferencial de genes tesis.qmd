@@ -1,0 +1,168 @@
+---
+title: "Expresión diferencial de genes con DSEq2"
+subtitle: "Análisis exploratorio de datos"
+author: "Piero Palacios Bernuy"
+toc: true
+toc-title: Contenido
+number-sections: true
+format: 
+  pdf:
+    geometry: 
+      - top=30mm
+      - left=30mm
+editor: visual
+bibliography: references.bib
+csl: apa-annotated-bibliography.csl
+---
+
+```{r}
+#| include: false
+
+library(knitr)
+library(tinytex)
+knitr::opts_chunk$set(cache = TRUE, cache.lazy = FALSE, warning = FALSE,
+                      message = FALSE, dpi=180, fig.width = 8,
+                      fig.height = 5)
+library(tidyverse)
+library(tximport)
+library(readxl)
+library(DESeq2)
+
+theme_set(theme_minimal())
+```
+
+## Importación de los conteos de genes
+
+Importamos las 100 muestras con su respectiva metadata. Esto lo haremos con el paquete `tximport` debido a que tiene una implementación para importar directamente datos provenientes de *RSEM*.
+
+```{r}
+#| echo: true
+sample_table <- read_excel("D:/tesis cafe/SRaRunTablecoffeaarabica.xlsx")
+rownames(sample_table)<-sample_table$Run
+
+dir<-"D:/tesis cafe/DESeq2 coffea/Gene_counts"
+list.files(dir)
+files<-list.files(file.path(dir),pattern = ".genes.results", full.names = TRUE)
+files <- files[sapply(rownames(sample_table), function(x)grep(x, files, value=FALSE, fixed=TRUE))]
+
+names(files)<-rownames(sample_table)
+
+txi.rsem<-tximport(files,type = "rsem",txIn = F,txOut = F)
+head(txi.rsem$counts,6,6)
+
+txi.rsem$length[txi.rsem$length == 0] <- 1
+
+```
+
+Una vez importado, formaremos un objeto del tipo *DESeq* con el siguiente diseño: $\sim Temperatura$. El análisis exploratorio nos dará indicios sobre si añadir los cultivares y los lugares de los laboratorios como parte del modelo.
+
+```{r}
+#| echo: true
+dds<-DESeqDataSetFromTximport(txi.rsem,colData = sample_table,design =~temp)
+
+dds_coll<-collapseReplicates(dds,groupby = dds$Replicate,run = dds$Run)
+
+rownames(colData(dds_coll))<-dds_coll$Run
+
+head(colData(dds_coll))
+
+```
+
+## Análisis exploratorio de datos
+
+Usaremos la transformación `rlog` del paquete DESeq2 para la exploración de los datos de conteo.
+
+Se puede visualizar que rlog controla bien la varianza.
+
+```{r}
+library(vsn)
+library(pheatmap)
+
+rld<-rlog(dds_coll)
+meanSdPlot(assay(rld))
+dds_coll<-estimateSizeFactors(dds_coll)
+select <- order(rowMeans(counts(dds_coll,normalized=TRUE)),
+                decreasing=TRUE)[1:30]
+```
+
+Tambien veamos la distancia entre muestras lo que nos puede dar indicios de los datos sin temperatura.
+
+```{r}
+sampleDists <- dist(t(assay(rld)))
+
+library("RColorBrewer")
+sampleDistMatrix <- as.matrix(sampleDists)
+rownames(sampleDistMatrix) <- paste(rld$temp, rld$geo_loc_name_country, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "GnBu")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+
+rownames(sampleDistMatrix) <- paste(rld$temp, rld$Cultivar, sep="-")
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "GnBu")) )(255)
+pheatmap(sampleDistMatrix,
+         clustering_distance_rows=sampleDists,
+         clustering_distance_cols=sampleDists,
+         col=colors)
+
+```
+
+Otra manera de ver las distancia entre muestras es con métodos de agrupamiento o *clustering*. Para esto podemos usar los dendrogramas o k-means.
+
+```{r}
+library(rafalib)
+
+hc<-hclust(sampleDists)
+
+myplclust(hc,labels = dds_coll$geo_loc_name_country,lab.col = as.fumeric(dds_coll$geo_loc_name_country),
+          ylab = "Altura", main="Dendograma Lugar")
+
+
+myplclust(hc,labels = dds_coll$Cultivar,lab.col = as.fumeric(dds_coll$Cultivar),
+          ylab = "Altura", main="Dendograma Cultivar")
+
+
+myplclust(hc,labels = as.character(dds_coll$temp),lab.col = as.numeric(dds_coll$temp),
+          ylab = "Altura", main="Dendograma Temperatura")
+```
+
+El pca tambien nos puede servir para identificar a esos datos sin temperatura. Además, nos ayudará a confirmar si las variables *Cultivar* y *Lugar* deben ir en el modelo de **DESeq2**.
+
+```{r}
+pcaData <- plotPCA(rld, intgroup=c("temp","geo_loc_name_country"), returnData=TRUE)
+pcaData <- pcaData%>%
+  mutate(Temperatura = temp, temp = NULL,
+         Lugar = geo_loc_name_country, geo_loc_name_country=NULL)
+
+percentVar <- round(100 * attr(pcaData, "percentVar"),2)
+a<-ggplot(pcaData, aes(PC1, PC2, color=Lugar, shape=Temperatura)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% varianza")) +
+  ylab(paste0("PC2: ",percentVar[2],"% varianza")) + 
+  coord_fixed()
+
+pcaData2 <- plotPCA(rld, intgroup=c("temp","Cultivar"), returnData=TRUE)
+
+pcaData2 <- pcaData2%>%
+  mutate(Temperatura = temp, temp = NULL)
+
+percentVar <- round(100 * attr(pcaData, "percentVar"),digits = 2)
+b<-
+  ggplot(pcaData2, aes(PC1, PC2, color=Cultivar, shape=Temperatura)) +
+  geom_point(size=3) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance")) + 
+  coord_fixed()
+
+
+```
+
+```{r}
+y<-assay(rld)-rowMeans(assay(rld))
+s<-svd(y)
+plot(s$d^2/sum(s$d^2),type="b")
+
+```
