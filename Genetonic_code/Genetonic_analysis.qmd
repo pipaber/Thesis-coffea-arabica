@@ -1,0 +1,465 @@
+---
+title: "Genetonic *Coffea arabica*"
+subtitle: "Análisis de gráficos"
+author: "Piero Palacios Bernuy"
+toc: true
+toc-title: Contenido
+number-sections: true
+format: 
+  pdf:
+    geometry: 
+      - top=30mm
+      - left=30mm
+editor: visual
+bibliography: references.bib
+csl: apa-annotated-bibliography.csl
+---
+
+```{r}
+#| include: false
+
+library(knitr)
+library(tinytex)
+knitr::opts_chunk$set(cache = TRUE, cache.lazy = FALSE, warning = FALSE,
+                      message = FALSE, dpi=180, fig.width = 8,
+                      fig.height = 5)
+library(tidyverse)
+library(readxl)
+library(GeneTonic)
+library(plotly)
+
+theme_set(theme_minimal())
+```
+
+## Gráficos 25 vs Control
+
+```{r}
+#| echo: true
+
+gtl_25_vs_control<-readRDS("gtl_25_vs_control.rds")
+
+```
+
+```{r}
+p <- enhance_table(gtl = gtl_25_vs_control,
+                   chars_limit = 60,
+                  n_gs = 30)
+p
+```
+
+```{r}
+gs_alluvial(gtl = gtl_25_vs_control,n_gs = 6)
+```
+
+```{r}
+library(scales)
+library(ggrepel)
+gs_volcano(gtl = gtl_25_vs_control,
+           p_threshold = 0.05,
+           color_by = "aggr_score",
+           volcano_labels = 10,
+           gs_ids = NULL,
+           plot_title = "Contraste 25 vs Control")
+```
+
+```{r}
+gs_dendro(gtl = gtl_25_vs_control,
+          n_gs = 50,
+          gs_dist_type = "kappa", 
+          clust_method = "ward.D2",
+          color_leaves_by = "z_score",
+          size_leaves_by = "gs_pvalue",
+          color_branches_by = "clusters",
+          create_plot = TRUE)
+```
+
+```{r}
+gs_mds(gtl = gtl_25_vs_control,
+       n_gs = 200,
+       gs_ids = NULL,
+       similarity_measure = "kappa_matrix",
+       mds_k = 2,
+       mds_labels = 5,
+       mds_colorby = "z_score",
+       gs_labels = NULL,
+       plot_title = NULL)
+```
+
+```{r}
+gs_summary_overview(gtl = gtl_25_vs_control,
+                    n_gs = 30,
+                    p_value_column = "gs_pvalue",
+                    color_by = "z_score")
+```
+
+```{r}
+gs_summary_heat(gtl = gtl_25_vs_control,
+                n_gs = 20)
+```
+
+## Gráficos 30 vs Control
+
+```{r}
+#| echo: true
+
+gtl_30_vs_control<-readRDS("gtl_30_vs_control.rds")
+
+```
+
+```{r}
+p <- enhance_table(gtl = gtl_30_vs_control,
+                   chars_limit = 60,
+                  n_gs = 30)
+p
+```
+
+```{r}
+gs_alluvial(gtl = gtl_30_vs_control,n_gs = 6)
+```
+
+```{r}
+
+gs_volcano(gtl = gtl_30_vs_control,
+           p_threshold = 0.05,
+           color_by = "aggr_score",
+           volcano_labels = 10,
+           gs_ids = NULL,
+           plot_title = "Contraste 30 vs Control")
+```
+
+```{r}
+gs_dendro(gtl = gtl_30_vs_control,
+          n_gs = 50,
+          gs_dist_type = "kappa", 
+          clust_method = "ward.D2",
+          color_leaves_by = "z_score",
+          size_leaves_by = "gs_pvalue",
+          color_branches_by = "clusters",
+          create_plot = TRUE)
+```
+
+```{r}
+gs_mds(gtl = gtl_30_vs_control,
+       n_gs = 200,
+       gs_ids = NULL,
+       similarity_measure = "kappa_matrix",
+       mds_k = 2,
+       mds_labels = 5,
+       mds_colorby = "z_score",
+       gs_labels = NULL,
+       plot_title = NULL)
+```
+
+```{r}
+gs_summary_overview(gtl = gtl_30_vs_control,
+                    n_gs = 30,
+                    p_value_column = "gs_pvalue",
+                    color_by = "z_score")
+```
+
+```{r}
+gs_summary_heat(gtl = gtl_30_vs_control,
+                n_gs = 20)
+```
+
+## Gráficos 37 vs Control
+
+```{r}
+#| echo: true
+
+gtl_37_vs_control<-readRDS("gtl_37_vs_control.rds")
+
+```
+
+```{r}
+p <- enhance_table(gtl = gtl_37_vs_control,
+                   chars_limit = 60,
+                  n_gs = 30)
+p
+```
+
+```{r}
+gs_alluvial(gtl = gtl_37_vs_control,n_gs = 6)
+```
+
+```{r}
+
+gs_volcano(gtl = gtl_37_vs_control,
+           p_threshold = 0.05,
+           color_by = "aggr_score",
+           volcano_labels = 10,
+           gs_ids = NULL,
+           plot_title = "Contraste 37 vs Control")
+```
+
+```{r}
+gs_dendro(gtl = gtl_37_vs_control,
+          n_gs = 50,
+          gs_dist_type = "kappa", 
+          clust_method = "ward.D2",
+          color_leaves_by = "z_score",
+          size_leaves_by = "gs_pvalue",
+          color_branches_by = "clusters",
+          create_plot = TRUE)
+```
+
+```{r}
+gs_mds(gtl = gtl_37_vs_control,
+       n_gs = 200,
+       gs_ids = NULL,
+       similarity_measure = "kappa_matrix",
+       mds_k = 2,
+       mds_labels = 5,
+       mds_colorby = "z_score",
+       gs_labels = NULL,
+       plot_title = NULL)
+```
+
+```{r}
+gs_summary_overview(gtl = gtl_37_vs_control,
+                    n_gs = 30,
+                    p_value_column = "gs_pvalue",
+                    color_by = "z_score")
+```
+
+```{r}
+gs_summary_heat(gtl = gtl_37_vs_control,
+                n_gs = 20)
+```
+
+## Gráficos 42 vs Control
+
+```{r}
+#| echo: true
+
+gtl_42_vs_control<-readRDS("gtl_42_vs_control.rds")
+
+```
+
+```{r}
+p <- enhance_table(gtl = gtl_42_vs_control,
+                   chars_limit = 60,
+                  n_gs = 30)
+p
+```
+
+```{r}
+gs_alluvial(gtl = gtl_42_vs_control,n_gs = 6)
+```
+
+```{r}
+
+gs_volcano(gtl = gtl_42_vs_control,
+           p_threshold = 0.05,
+           color_by = "aggr_score",
+           volcano_labels = 10,
+           gs_ids = NULL,
+           plot_title = "Contraste 42 vs Control")
+```
+
+```{r}
+gs_dendro(gtl = gtl_42_vs_control,
+          n_gs = 50,
+          gs_dist_type = "kappa", 
+          clust_method = "ward.D2",
+          color_leaves_by = "z_score",
+          size_leaves_by = "gs_pvalue",
+          color_branches_by = "clusters",
+          create_plot = TRUE)
+```
+
+```{r}
+gs_mds(gtl = gtl_42_vs_control,
+       n_gs = 200,
+       gs_ids = NULL,
+       similarity_measure = "kappa_matrix",
+       mds_k = 2,
+       mds_labels = 5,
+       mds_colorby = "z_score",
+       gs_labels = NULL,
+       plot_title = NULL)
+```
+
+```{r}
+gs_summary_overview(gtl = gtl_42_vs_control,
+                    n_gs = 30,
+                    p_value_column = "gs_pvalue",
+                    color_by = "z_score")
+```
+
+```{r}
+gs_summary_heat(gtl = gtl_42_vs_control,
+                n_gs = 20)
+```
+
+## Comparación entre los genesets de los contrastes
+
+```{r}
+#| echo: false
+gs_radar2<-function (res_enrich, res_enrich2 = NULL,res_enrich3 = NULL,res_enrich4 = NULL, n_gs = 20, p_value_column = "gs_pvalue") 
+{
+  if (!("z_score" %in% colnames(res_enrich))) {
+    warning("You need to add the z_score or the aggregated score")
+  }
+  if (!is.null(res_enrich2)) {
+    if (!("z_score" %in% colnames(res_enrich2))) {
+      warning("You need to add the z_score or the aggregated score")
+    }
+  }
+  if (!is.null(res_enrich3)) {
+    if (!("z_score" %in% colnames(res_enrich3))) {
+      warning("You need to add the z_score or the aggregated score")
+    }
+  }
+  if (!is.null(res_enrich4)) {
+    if (!("z_score" %in% colnames(res_enrich4))) {
+      warning("You need to add the z_score or the aggregated score")
+    }
+  }
+  if (is.null(res_enrich2) & is.null(res_enrich3) & is.null(res_enrich4)) {
+    res_enrich$logp10 <- -log10(res_enrich[[p_value_column]])
+    res_enrich <- res_enrich[seq_len(n_gs), ]
+    log_smallest_p <- max(res_enrich$logp10)
+    set_colors <- RColorBrewer::brewer.pal(n = 8, "Dark2")
+    p <- plot_ly(type = "scatterpolar", mode = "markers", 
+      fill = "toself") %>% add_trace(r = c(res_enrich$logp10, 
+      res_enrich$logp10[1]), theta = c(res_enrich[["gs_description"]], 
+      res_enrich[["gs_description"]][1]), name = "scenario 1") %>% 
+      plotly::layout(polar = list(radialaxis = list(visible = TRUE, 
+        range = c(0, log_smallest_p))))
+  }
+  else {
+    gs_set1 <- res_enrich$gs_id
+    gs_set2 <- res_enrich2$gs_id
+    gs_set3 <- res_enrich3$gs_id
+    gs_set4 <- res_enrich4$gs_id
+    gs_common <- Reduce(intersect,list(gs_set1, gs_set2, gs_set3, gs_set4))
+    gs_common <- gs_common[seq_len(min(n_gs, length(gs_common)))]
+    if (length(gs_common) == 0) {
+      stop("No gene sets have been found in common to the enrichment results")
+    }
+    common_re1 <- res_enrich[gs_common, ]
+    common_re2 <- res_enrich2[gs_common, ]
+    common_re3 <- res_enrich3[gs_common, ]
+    common_re4 <- res_enrich4[gs_common, ]
+    common_re1$logp10 <- (common_re1[[p_value_column]])
+    common_re2$logp10 <- (common_re2[[p_value_column]])
+    common_re3$logp10 <- (common_re3[[p_value_column]])
+    common_re4$logp10 <- (common_re4[[p_value_column]])
+    
+    log_smallest_p <- max(common_re1$logp10, common_re2$logp10, common_re3$logp10, common_re4$logp10)
+    set_colors <- RColorBrewer::brewer.pal(n = 8, "Dark2")
+    p <- plot_ly(type = "scatterpolar", mode = "markers", 
+      fill = "toself") %>%add_trace(r = c(common_re1$logp10, 
+      common_re1$logp10[1]), theta = c(common_re1[["gs_description"]], 
+      common_re1[["gs_description"]][1]), name = "Contraste 25°C vs 23°C")%>%add_trace(r = c(common_re2$logp10, common_re2$logp10[1]), 
+        theta = c(common_re2[["gs_description"]], common_re2[["gs_description"]][1]), 
+        name = "Contraste 30°C vs 23°C")%>%add_trace(r = c(common_re3$logp10, 
+      common_re3$logp10[1]), theta = c(common_re3[["gs_description"]], 
+      common_re3[["gs_description"]][1]), name = "Contraste 37°C vs 23°C")%>%add_trace(r = c(common_re4$logp10, 
+      common_re4$logp10[1]), theta = c(common_re4[["gs_description"]], 
+      common_re4[["gs_description"]][1]), name = "Contraste 42°C vs 23°C")%>%
+      plotly::layout(polar = list(radialaxis = list(visible = TRUE, 
+      range = c(0, log_smallest_p))))
+  }
+  return(p)
+}
+
+
+```
+
+### Top 20 genesets del contraste 37 vs control
+
+```{r}
+
+ind<-gtl_37_vs_control$res_enrich[which(gtl_37_vs_control$res_enrich$gs_NES>0),]
+
+ind<-head(row.names(ind),n=20)
+
+
+a<-gs_radar2(res_enrich = gtl_37_vs_control$res_enrich[ind,],
+res_enrich2 = gtl_42_vs_control$res_enrich[ind,],
+res_enrich3 = gtl_42_vs_37$res_enrich[ind,])
+a
+```
+
+### Top 20 genesets del contraste 42 vs control
+
+```{r}
+
+ind<-gtl_42_vs_control$res_enrich[which(gtl_42_vs_control$res_enrich$gs_NES>0),]
+
+ind<-head(row.names(ind),n=20)
+
+
+b<-gs_radar2(res_enrich = gtl_37_vs_control$res_enrich[ind,],
+res_enrich2 = gtl_42_vs_control$res_enrich[ind,],
+res_enrich3 = gtl_42_vs_37$res_enrich[ind,])
+b
+```
+
+### Top 20 genesets del contraste 42 vs 37
+
+```{r}
+
+ind<-gtl_42_vs_37$res_enrich[which(gtl_42_vs_37$res_enrich$gs_NES>0),]
+
+ind<-head(row.names(ind),n=20)
+
+
+c<-gs_radar2(res_enrich = gtl_37_vs_control$res_enrich[ind,],
+res_enrich2 = gtl_42_vs_control$res_enrich[ind,],
+res_enrich3 = gtl_42_vs_37$res_enrich[ind,])
+c
+```
+
+```{r}
+go_names_plot<-c("defense response to fungus",
+                 "diterpenoid biosynthetic process",
+                 "cytokinin-activated signaling pathway",
+                 "unfolded protein binding",
+                 "protein self-association",
+                 "auxin-activated signaling pathway",
+                 "catalase activity",
+                 "terpene synthase activity",
+                 "water channel activity",
+                 "endoplasmic reticulum lumen",
+                 "sexual reproduction",
+                 "nuclear speck",
+                 "chaperone binding",
+                 "transcription factor TFIID complex",
+                 "defense response to bacterium",
+                 "spliceosomal complex",
+                 "precatalytic spliceosome",
+                 "nucleolus")
+
+
+gs_radar2(
+  res_enrich = gtl_25_vs_control$res_enrich[gtl_25_vs_control$res_enrich$gs_description %in%
+                                              go_names_plot, ],
+  res_enrich2 = gtl_30_vs_control$res_enrich[gtl_30_vs_control$res_enrich$gs_description %in%
+                                               go_names_plot,],
+  res_enrich3 = gtl_37_vs_control$res_enrich[gtl_37_vs_control$res_enrich$gs_description%in%go_names_plot,],
+  res_enrich4 = gtl_42_vs_control$res_enrich[gtl_42_vs_control$res_enrich$gs_description %in%
+                                               go_names_plot,],
+  p_value_column = "gs_NES")
+
+#escoger genesets para graficar y revisar papers
+```
+
+```{r}
+
+compa_list <- list(
+  scenario2 = gtl_30_vs_control$res_enrich[gtl_30_vs_control$res_enrich$gs_description %in%
+                                               go_names_plot,],
+  scenario3 = gtl_37_vs_control$res_enrich[gtl_37_vs_control$res_enrich$gs_description %in%
+                                               go_names_plot,],
+  scenario4 = gtl_42_vs_control$res_enrich[gtl_42_vs_control$res_enrich$gs_description %in%
+                                               go_names_plot,]
+)
+
+gs_horizon(res_enrich = gtl_25_vs_control$res_enrich[gtl_25_vs_control$res_enrich$gs_description %in%go_names_plot, ],
+           compared_res_enrich_list = compa_list,
+           n_gs = 20,
+           sort_by = "clustered")
+```
